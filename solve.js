@@ -34,6 +34,13 @@ export function run(input) {
   let fVal = '';
   let fEnd = 2;
   let fAdded = 0;
+  // v2: end of the current line (index of its LF, or n). Found once per
+  // record, so an unquoted field searches only for ',' instead of ',' and
+  // '\n' — the '\n' search used to rescan the whole rest of the line per
+  // field. Invariant: lineEnd is the first '\n' at or after the position it
+  // was computed for (or n); after any quoted field that consumed a newline,
+  // pos has moved past it, so `lineEnd < pos` forces a recompute.
+  let lineEnd = -1;
   // Reads an unquoted field starting at pos, with `init` already in the value
   // ("" normally; '"' for an unterminated quote re-read; the quoted value for junk).
   // `added` counts characters kept by this call.
@@ -41,18 +48,18 @@ export function run(input) {
     let value = init;
     let added = 0;
     for (;;) {
+      if (lineEnd < pos) { lineEnd = text.indexOf('\n', pos); if (lineEnd === -1) lineEnd = n; }
       const iC = text.indexOf(',', pos);
-      const iN = text.indexOf('\n', pos);
-      let e = n;
-      if (iC !== -1 && iC < e) e = iC;
-      if (iN !== -1 && iN < e) e = iN;
+      let e = lineEnd;
+      let isComma = false;
+      if (iC !== -1 && iC < lineEnd) { e = iC; isComma = true; }
       const seg = text.slice(pos, e);
       const r = seg.indexOf('\r');
       if (r === -1) {
         if (seg !== '') { value += seg; added += seg.length; }
         if (e >= n) { pos = n; fVal = value; fEnd = 2; fAdded = added; return; }
-        if (e === iC) { pos = e + 1; fVal = value; fEnd = 0; fAdded = added; return; }
-        // e === iN: LF line break.
+        if (isComma) { pos = e + 1; fVal = value; fEnd = 0; fAdded = added; return; }
+        // e === lineEnd < n: LF line break.
         pos = e + 1; line += 1; fVal = value; fEnd = 1; fAdded = added; return;
       }
       // Rare: a stray CR inside this segment (or a CRLF at its end).
@@ -66,11 +73,11 @@ export function run(input) {
           if (cur < seg.length) { out += seg.slice(cur); added += seg.length - cur; }
           value = out;
           if (e >= n) { pos = n; fVal = value; fEnd = 2; fAdded = added; return; }
-          if (e === iC) { pos = e + 1; fVal = value; fEnd = 0; fAdded = added; return; }
+          if (isComma) { pos = e + 1; fVal = value; fEnd = 0; fAdded = added; return; }
           pos = e + 1; line += 1; fVal = value; fEnd = 1; fAdded = added; return;
         }
         if (j > cur) { out += seg.slice(cur, j); added += j - cur; }
-        if (j === seg.length - 1 && e === iN) {
+        if (j === seg.length - 1 && e === lineEnd && lineEnd < n) {
           // CRLF: the CR belongs to the line break.
           value = out;
           pos = e + 1; line += 1; fVal = value; fEnd = 1; fAdded = added; return;
